@@ -1,50 +1,60 @@
-const staticFiles = [
+// collection of all the static files which form the the shell of your app 
+const staticAssets = [
     './',
     './style.css',
-    './app.js',
-    './index.html'
+    './app.js'
 ];
 
-// On installing the app, first time, cache all the staticFiles =>
-self.addEventListener("install", (e) => {
-    console.log("[Service Worker] Installed");
-    // wait untill event is complete =>
-    e.waitUntil(
-        caches.open("staticCache").then((cache) => {
-            console.log("Caching static files")
-            cache.addAll(staticFiles);
-        })
-    )
-})
+var mode; //used to keep a check whether we are online at this point of time or offline
 
-// On fetching some data from app =>
-self.addEventListener("fetch", (e) => {
-    console.log("[Service Worker] Fetch", e.request.url);
-    var dictUrl = "https://dictionaryapi.com/api/v3/references/learners/json/";
+// install event is called the very first time we register a servic worker
+self.addEventListener('install', async event => {
+    // #caches are http caches provided by service worker check Application >Cache > Cache Storage
+    const cache = await caches.open('static-def'); // stores the shell part
+    cache.addAll(staticAssets);
+});
 
-    // If >-1, ie. the URL is present in the request, ie. request successful and WE ARE ONLINE =>
-    if(e.request.url.indexOf(dictUrl) > -1){
-        e.respondWith(
-            // open dynamicCache =>
-            caches.open("dynamicCache").then((cache) => {
-                // fetch data from URL =>
-                return fetch(e.request).then((res) => {
-                    // cache the data fetched =>
-                    cache.put(e.request.url, res.clone());
-                    // return the data =>
-                    return res;
-                })
-            })
-        )
-    }
-    // ELSE, WE ARE OFFLINE, fetch data from cache, or try to fetch it.
+// called whenever fetxh function is called in the client side
+self.addEventListener('fetch', event => { 
+    console.log(event);
+    const {request} = event;
+    const url = new URL(request.url);
+    if(mode==false) //check if online or offline
+    event.respondWith(cacheData(request)); // if offline we have to check cache
     else{
-        e.respondWith(
-            // Search cache for a match =>
-            caches.match(e.request).then((res) => {
-                // Return matched result or fetch =>
-                return res || fetch(e.request);
-            })
-        )
+        if(url.origin === location.origin) { // if the url that we are searching for is in the domain check cache first
+            event.respondWith(cacheData(request));
+        } else {
+            event.respondWith(networkFirst(request)); // for outside urls do not check cache 
+        }
     }
-})
+
+});
+
+self.addEventListener('message', function(event){
+    if(event.data=="offline")
+    mode=false
+    else
+    mode=true
+    console.log("message: "+mode);
+});
+
+async function cacheData(request) 
+{
+    const cachedResponse = await caches.match(request); // check for request object for a match else returns nothing
+    return cachedResponse || fetch(request); 
+}
+
+async function networkFirst(request) 
+{
+    const cache = await caches.open('dynamic-def'); // stores the dynamic part of the pwa
+
+    try {
+        const response = await fetch(request);
+        cache.put(request, response.clone()); // map new request objects to the result object
+        return response;
+    } catch (error){
+        return await cache.match(request); // if theres an error in making network first request it will check the caches
+    }
+
+}
